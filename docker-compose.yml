@@ -1,0 +1,41 @@
+services:
+  # 1. Redis Instance
+  redis:
+    image: redis:7-alpine
+    container_name: go_app_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    # ADD THIS LINE TO ENFORCE A PASSWORD:
+    command: redis-server --requirepass "my_secret_password"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "my_secret_password", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 2. Go Application Placeholder (With Live Reloading)
+#  app:
+#    image: cosmtrek/air:v1.51.0
+#    container_name: squash-it
+#    working_dir: /app
+#    ports:
+#      - "8080:8080"
+#    # Mounts your current directory into the container so changes sync instantly
+#    volumes:
+#      - .:/app
+#      - sqlite_data:/app/data
+#    environment:
+#      - REDIS_URL=redis://redis:6379/0
+#      - SQLITE_DB_PATH=/app/data/app.db
+#      - APP_PORT=:8080
+#    depends_on:
+#      redis:
+#        condition: service_healthy
+#    restart: unless-stopped
+#
+volumes:
+  redis_data:
+  sqlite_data:
