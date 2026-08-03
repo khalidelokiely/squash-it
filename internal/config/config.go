@@ -34,8 +34,8 @@ func Load() Config {
 		RedisTTL:            time.Duration(getEnvInt("REDIS_TTL_HOURS", 168)) * time.Hour,
 		LRUCapacity:         getEnvInt("CAPACITY", 100),
 		RatePerMinute:       getEnvInt("RATE_PER_MINUTE", 60),
-		RateBurst:           getEnvInt("BURST", 5),
-		RateCleanupInterval: time.Duration(getEnvInt("CLEANUP_DURATION_SECONDS", 300)) * time.Second,
+		RateBurst:           getEnvInt("RATE_BURST", 5),
+		RateCleanupInterval: time.Duration(getEnvInt("RATE_CLEANUP_DURATION_SECONDS", 300)) * time.Second,
 		ShutdownTimeout:     time.Duration(getEnvInt("SHUTDOWN_TIMEOUT_SECONDS", 30)) * time.Second,
 	}
 }
