@@ -15,7 +15,6 @@ func (r *Router) Spin() *http.Server {
 		ReadTimeout:  r.opts.ReadTimeout,
 		WriteTimeout: r.opts.WriteTimeout,
 	}
-
 	go func() {
 		fmt.Println("[SQUASH-IT] Server Listening on :" + r.opts.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

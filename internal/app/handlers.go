@@ -48,6 +48,13 @@ func (h *URLShortenHandler) EncodeURL(ctx context.Context, c *router.RequestCont
 	hash, err := h.svc.CreateURL(ctx, urlDTO.LongURL)
 
 	if err != nil {
+		if errors.Is(err, ErrInvalidURL) {
+			c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+
 		c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -78,7 +85,7 @@ func (h *URLShortenHandler) DecodeURL(ctx context.Context, c *router.RequestCont
 	longURL, err := h.svc.GetURLFromHash(ctx, pathHashDTO.PathHash)
 
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, ErrUnknownHash) {
 			c.JSON(http.StatusNotFound, map[string]interface{}{
 				"error": err.Error(),
 			})

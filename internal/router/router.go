@@ -64,6 +64,10 @@ func (r *Router) POST(path string, handler HandlerFunc, mw ...HandlerFunc) {
 	r.addRoute("POST", path, handler, mw...)
 }
 
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	r.mux.ServeHTTP(w, req)
+}
+
 // TODO: implement remaining methods upon need
 
 func (r *Router) PUT(path string, handler HandlerFunc) {
