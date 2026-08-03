@@ -29,6 +29,32 @@ They get squashed!
 ## High Level Architecture Diagram
 
 ![architecture-diagram](https://i.ibb.co/95MCTmR/nse-3582493939104706872-Notes-260803-195754-jpg.jpg)
+
+### What is happening?
+
+### **`/encode` Flow (Long URL -> Short URL):**
+- The user's request first hits the rate limiter
+- The DTO is parsed and sent to the service
+- The service generates an 8 character murmur hash inside a retry loop for collision resolution
+- The hash is evaluated against Bloom filter. 
+  - If it doesn't exist an idempotent executeInsert method is called on the hashToken and the longURL. Returning the final hashToken to the user
+  - If bloom asserts FP (Maybe exists). We issue a lookup into the database (by the hash / pathHash). Check if the returned longURL matches the user's intention. If it doesn't a collision happened, we move on with another retry.
+- This loop continues until we either create or find a proper pathHash matching the longURL provided. Or we run out of retries and exit the service so we don't hash indefinitely.
+
+### **`/decode` Flow (pathHash -> LongURL):**
+- The provided hash is evaluated against the bloom filter.
+  - Not Found path: Fail fast - this is protection against spamming or bot attempts. If the user rencodes the long URL using the encode flow and get the same pathHash, bloom will be updated and the next `/decode` call will converge into the below
+  - Maybe Found: Check the cache pipeline:
+    - Found: Return it
+    - Not Found: Query the database.
+      - Found: Update the cache pipeline, bloom and return the longURL back to the user.
+      - Not Found: return error
+
+### **The additional Visit URL path:**
+
+This route takes in the full url. Does the same as the decode flow except:
+- update the click_count metric in the database
+- Redirect the user to the longURL using a `302 Found` code so that the browser doesn't cache the Location header.
 ## External Packages Used
 
 - Bloom Filter package [bits-and-blooms/bloom](https://github.com/bits-and-blooms/bloom)
@@ -68,7 +94,7 @@ This service uses a token bucket algorithm which refills a bucket based on the (
 stores a:
 - map of user identifier pointing to a 
 `*tokenBucket` reference.
-- tokens `burstLimit` which is how many tokens the user is allowed to exhaust per second before we throttle. A number closer to 5 keeps the usage uniform across the minute.
+- tokens `burstLimit` which is how many tokens the user is allowed to exhaust per instant before we throttle.
 
 The Bucket also performs a lazy cleanup loop triggered by the `Allow(user string) bool` instead of spinning up a ticker so that if we're sitting idle with no hits, our CPU cycles are not exhausted. Only 1 goroutine can perform a cleanup at a time by using atomic flags making it efficient
 
@@ -97,11 +123,12 @@ A distributed bloom filter on redis (via RedisBloom) would be the choice, with p
 #### Observability
 Throughout the service, it was made sure that `context.Context` is glorified for the exact purpose of this section. Scaling. 
 
-Which is an PoC of why the abstraction over `net/http` was created for this project. To provide `context.Context` cleanly as the first parameter in route handler function `router.HandlerFunc`. 
+Which is why the abstraction over `net/http` was created for this project. To provide `context.Context` cleanly as the first parameter in route handler function `router.HandlerFunc`. 
 
 If we're scaling the service, propagating context throughout the application doesn't only make it listen for cancellation signals, but also allow observability frameworks like **OpenTelemetry** and distributed tracing systems like **Jaeger** to trace spans across application components and their offshore distributed sidecars or peers.
 
-## On Bloom filter
+## On Bloom Filter
+> I Keep asking. What if Bloom Doesn't Bloom Enough?
 
 A bloom filter is really as robust as its startup. A bloom's filter guarantee is providing definitive assertion if a key doesn't exist. If, for any reason the filter goes out of sync, it will begin providing false negatives.
 
@@ -120,7 +147,7 @@ Additionally, Squash-it does the following:
 
 This is best-effort. One thing that could be done to enhance it:
 
-- If we recieve a shutdown while background reconstruction is happening. Instead of serializing and overwriting empty bloom filter. We serialize the backlog and pick it up when we restart.
+- If we recieve a shutdown while background reconstruction is happening. Instead of serializing and overwriting our previous bloom binary with an empty bloom filter. We serialize the backlog and pick it up when we restart.
 
 ## AI Usage
 AI assistance was limited to targeted lookups. SQLite syntax I don't use daily, and confirming the correct `net/http` approach for extracting client IP. All architecture, design decisions, and implementation are my own, including anything wrong with them.
