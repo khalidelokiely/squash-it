@@ -29,7 +29,7 @@ They get squashed!
 
 ## High Level Architecture Diagram
 
-![architecture-diagram](https://i.ibb.co/95MCTmR/nse-3582493939104706872-Notes-260803-195754-jpg.jpg)
+![architecture-diagram](https://i.ibb.co/v8HD8rt/nse-236004746501201759-Notes-260803-202100-jpg.jpg)
 
 ### What is happening?
 
