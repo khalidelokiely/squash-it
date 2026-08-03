@@ -7,7 +7,7 @@ They get squashed!
 
 # Table of contents
 - [Architecture behind Squash-it](#architecture-behind-squash-it)
-- [Architecture Diagram](#architecture-diagram)
+- [Architecture Diagram](#high-level-architecture-diagram)
 - [External Packages Used](#external-packages-used)
 - [Custom Components](#custom-components)
 - [Hash Choice](#hash-choice)
@@ -26,8 +26,9 @@ They get squashed!
 - An L2 Redis Cache. The app absolutely does NOT need redis to run. It safely and silently degrades to only LRU in case of no redis connectivity.
 - A simple SQLite database with a single table. This is the main choice over NoSQL because of the simplicity it offers for this demo / assignment.
 
-## Architecture Diagram
-![img.png](img.png)
+## High Level Architecture Diagram
+
+![architecture-diagram](https://i.ibb.co/95MCTmR/nse-3582493939104706872-Notes-260803-195754-jpg.jpg)
 ## External Packages Used
 
 - Bloom Filter package [bits-and-blooms/bloom](https://github.com/bits-and-blooms/bloom)
