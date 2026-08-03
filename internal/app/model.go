@@ -27,8 +27,3 @@ func (u *URL) ScanDest() []any {
 		&u.CreatedAt, &u.CreatedBy, &u.DeletedAt, &u.DeletedBy, &u.DeletedReason,
 	}
 }
-
-type Category struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"` // e.g., "Malware", "Streaming"
-}

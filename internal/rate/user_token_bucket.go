@@ -26,15 +26,17 @@ type UserTokenBucket struct {
 	burstLimit   int
 	lastCleanUp  atomic.Int64
 	isCleaningUp atomic.Int32
+	cleanUpAfter time.Duration
 }
 
-func NewUserTokenBucket(ratePerMinute int, burst int) *UserTokenBucket {
+func NewUserTokenBucket(ratePerMinute, burst int, cleanUpAfter time.Duration) *UserTokenBucket {
 	limitPerSecond := rate.Limit(float64(ratePerMinute) / 60.0)
 
 	utb := &UserTokenBucket{
-		userTokens: make(map[string]*tokenBucket),
-		rate:       limitPerSecond,
-		burstLimit: burst,
+		userTokens:   make(map[string]*tokenBucket),
+		rate:         limitPerSecond,
+		burstLimit:   burst,
+		cleanUpAfter: cleanUpAfter,
 	}
 
 	utb.lastCleanUp.Store(time.Now().Unix())
@@ -49,8 +51,7 @@ func (u *UserTokenBucket) Allow(userID string) bool {
 
 	if !ok {
 		bucket = &tokenBucket{
-			limiter:  rate.NewLimiter(u.rate, u.burstLimit),
-			lastSeen: time.Now(),
+			limiter: rate.NewLimiter(u.rate, u.burstLimit),
 		}
 
 		u.userTokens[userID] = bucket
@@ -63,7 +64,7 @@ func (u *UserTokenBucket) Allow(userID string) bool {
 
 	lastCleanupUnix := u.lastCleanUp.Load()
 
-	if time.Since(time.Unix(lastCleanupUnix, 0)) > 5*time.Minute {
+	if time.Since(time.Unix(lastCleanupUnix, 0)) > u.cleanUpAfter {
 		if u.isCleaningUp.CompareAndSwap(0, 1) {
 			go u.cleanUp()
 		}
@@ -78,12 +79,13 @@ func (u *UserTokenBucket) cleanUp() {
 	defer u.mu.Unlock()
 
 	lastCleanUpUnix := u.lastCleanUp.Load()
-	if time.Since(time.Unix(lastCleanUpUnix, 0)) > 5*time.Minute {
+	// Cleaned up less than 5 minutes ago
+	if time.Since(time.Unix(lastCleanUpUnix, 0)) < u.cleanUpAfter {
 		return
 	}
 
 	for userID, bucket := range u.userTokens {
-		if time.Since(bucket.lastSeen) > 5*time.Minute {
+		if time.Since(bucket.lastSeen) > u.cleanUpAfter {
 			delete(u.userTokens, userID)
 		}
 	}

@@ -1,6 +1,7 @@
 package filter
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 )
+
+var ErrFilterNotReady = errors.New("bloom filter is currently restoring from binary")
 
 type Bloom struct {
 	bf      *bloom.BloomFilter
@@ -39,11 +42,11 @@ func NewBloom(items uint) *Bloom {
 // active filter to ensure zero data loss, and standard Bloom filtering resumes.
 //
 // TODO: The main nuance to address while scaling this bloom.BloofFilter is that
-//		to enable resiliency across multiple application instances, the remote
-//		storage location for the serialized filter must be locked. A distributed
-//		lock ensures an instance safely loads and reserializes the state before
-//		another instance pulls the updated copy.
-
+//
+//	to enable resiliency across multiple application instances, the remote
+//	storage location for the serialized filter must be locked. A distributed
+//	lock ensures an instance safely loads and reserializes the state before
+//	another instance pulls the updated copy.
 func NewFromBinary(items uint, data []byte) *Bloom {
 	fmt.Println("found bloom filter, begnnning restore")
 	fallbackBf := bloom.NewWithEstimates(items, 0.01)
@@ -110,11 +113,26 @@ func (b *Bloom) Add(key string) {
 func (b *Bloom) Serialize() ([]byte, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	if !b.ready {
+		return nil, ErrFilterNotReady
+	}
+
 	return b.bf.MarshalBinary()
 }
 
+// WriteTo takes an io.Writer and writes the existing filter to it.
+// TODO: If !b.ready. Save the backlog instead as a json in disk. This way if
+//
+//	the filter application dies before we could fully unmarshal, we have
+//	the WAL ready to replay.
 func (b *Bloom) WriteTo(w io.Writer) (int64, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
+
+	if !b.ready {
+		return 0, ErrFilterNotReady
+	}
+
 	return b.bf.WriteTo(w)
 }

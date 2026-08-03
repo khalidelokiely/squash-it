@@ -17,7 +17,7 @@ func (r *Router) Spin() *http.Server {
 	}
 
 	go func() {
-		fmt.Println("net/http Server Listening on :" + r.opts.Port)
+		fmt.Println("[SQUASH-IT] Server Listening on :" + r.opts.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("HTTP server error: %v", err)
 		}

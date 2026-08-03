@@ -7,6 +7,9 @@ import (
 	"squash-it/internal/router"
 )
 
+// RateLimiterMiddleware Takes in a rate.Limiter and performs .Allow() check on user IP fetched by
+// c (*router.RequestContext).GetClientIP()
+// Returns a 429 with no retry-after header intentionally for scope.
 func RateLimiterMiddleware(limiter rate.Limiter) router.HandlerFunc {
 	return func(ctx context.Context, c *router.RequestContext) {
 		if limiter == nil {

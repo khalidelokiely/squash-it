@@ -10,7 +10,28 @@ import (
 	"strings"
 )
 
+type Repository interface {
+	// FindByLongURL takes in the long representation of a URL and returns a pointer to a URL with the database
+	// or error with nil pointer
+	FindByLongURL(ctx context.Context, longURL string) (*URL, error)
+
+	// FindByPathHash takes in the pathHash (hashToken) and returns a pointer to a URL with the database.
+	// or error with nil pointer.
+	// Note: the pathHash is NOT a complete URL. It's the first {pathHash} named parameter in the endpoint or
+	//		 the pathHash ("path_hash" as JSON field) Field in URLDecodeDTO
+	FindByPathHash(ctx context.Context, pathHash string) (*URL, error)
+
+	// Create idempotent creation using pathHash and longURL.
+	// On LongURL conflict: get the record and return it - no errors
+	// On PathHash conflict: return ErrDuplicatedPathHash error
+	Create(ctx context.Context, url *URL) error
+
+	// UpdateClickCountByPathHash increments the click_count field in the table by 1
+	UpdateClickCountByPathHash(ctx context.Context, pathHash string) error
+}
+
 var ErrNotFound = errors.New("url record not found")
+var ErrDuplicatedPathHash = errors.New("duplicated path hash")
 
 type URLRepository struct {
 	db        *db.Database
@@ -24,18 +45,25 @@ func NewURLRepository(db *db.Database) *URLRepository {
 	}
 }
 
+func (r *URLRepository) FindByLongURL(ctx context.Context, longURL string) (*URL, error) {
+	return r.findBy(ctx, "long_url", longURL)
+}
+
 func (r *URLRepository) FindByPathHash(ctx context.Context, pathHash string) (*URL, error) {
+
+	return r.findBy(ctx, "path_hash", pathHash)
+}
+
+func (r *URLRepository) findBy(ctx context.Context, col string, params ...any) (*URL, error) {
 	var u URL
 
 	columns := strings.Join(u.Columns(), ", ")
 
-	query := fmt.Sprintf(`SELECT %s 
-								FROM %s 
-								WHERE path_hash = ?`,
-		columns, r.tableName)
+	query := fmt.Sprintf(`SELECT %s
+								FROM %s
+								WHERE %s = ?`, columns, r.tableName, col)
 
-	err := r.db.QueryRowContext(ctx, query, pathHash).
-		Scan(u.ScanDest()...)
+	err := r.db.QueryRowContext(ctx, query, params...).Scan(u.ScanDest()...)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -45,6 +73,7 @@ func (r *URLRepository) FindByPathHash(ctx context.Context, pathHash string) (*U
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("repository query timed out: %w", err)
 		}
+
 		return nil, fmt.Errorf("repository query failed: %w", err)
 	}
 
@@ -53,43 +82,46 @@ func (r *URLRepository) FindByPathHash(ctx context.Context, pathHash string) (*U
 
 func (r *URLRepository) Create(ctx context.Context, url *URL) error {
 	columns := strings.Join(url.Columns(), ", ")
-	placeholders := r.getPlaceholders(2)
 
 	query := fmt.Sprintf(`INSERT INTO %s (path_hash, long_url)
-								VALUES (%s) 
+								VALUES (?, ?)
+								ON CONFLICT (long_url) DO UPDATE SET long_url = EXCLUDED.long_url
 								RETURNING %s`,
-		r.tableName, placeholders, columns)
+		r.tableName, columns)
 
 	err := r.db.QueryRowContext(ctx, query, url.PathHash, url.LongURL).
 		Scan(url.ScanDest()...)
 
 	if err != nil {
-		return err
+		if errors.Is(r.db.MapError(err), db.ErrDuplicateKey) {
+			return ErrDuplicatedPathHash
+		}
+
+		return fmt.Errorf("repository query failed: %w", err)
 	}
+
 	return nil
 }
 
-func (r *URLRepository) UpdateClickCount(ctx context.Context, pathHash string) error {
-	return r.TransactionSerializable(ctx, func(tx *sql.Tx) error {
-		query := fmt.Sprintf(`UPDATE %s SET click_count = click_count + 1 WHERE path_hash = ?`, r.tableName)
-		result, err := tx.ExecContext(ctx, query, pathHash)
+func (r *URLRepository) UpdateClickCountByPathHash(ctx context.Context, pathHash string) error {
+	query := fmt.Sprintf(`UPDATE %s SET click_count = click_count + 1 WHERE path_hash = ?`, r.tableName)
+	result, err := r.db.ExecContext(ctx, query, pathHash)
 
-		if err != nil {
-			return fmt.Errorf("execute query failed: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("execute query failed: %w", err)
+	}
 
-		rows, err := result.RowsAffected()
+	rows, err := result.RowsAffected()
 
-		if err != nil {
-			return fmt.Errorf("rows affected check: %w", err)
-		}
+	if err != nil {
+		return fmt.Errorf("rows affected check: %w", err)
+	}
 
-		if rows == 0 {
-			return fmt.Errorf("no rows updated for hash: %s", pathHash)
-		}
+	if rows == 0 {
+		return fmt.Errorf("no rows affected to click count update")
+	}
 
-		return nil
-	})
+	return nil
 }
 
 func (r *URLRepository) TransactionSerializable(ctx context.Context, fn func(tx *sql.Tx) error) error {
@@ -114,21 +146,17 @@ func (r *URLRepository) txWithIso(ctx context.Context, level sql.IsolationLevel,
 	}
 
 	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+
 		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 			log.Printf("transaction rollback failed: %v", err)
 		}
 	}()
 
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
-		}
-	}()
-
-	err = fn(tx)
-
-	if err != nil {
+	if err = fn(tx); err != nil {
 		return fmt.Errorf("transaction failed: %w", err)
 	}
 
@@ -139,11 +167,22 @@ func (r *URLRepository) txWithIso(ctx context.Context, level sql.IsolationLevel,
 
 }
 
-func (r *URLRepository) getPlaceholders(count int) string {
-	placeholders := make([]string, count)
+func (r *URLRepository) Migrate(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+				CREATE TABLE IF NOT EXISTS urls
+				(
+					 id             INTEGER PRIMARY KEY AUTOINCREMENT,
+					 path_hash      TEXT     NOT NULL UNIQUE,
+					 long_url       TEXT     NOT NULL UNIQUE,
+					 click_count    INTEGER  NOT NULL DEFAULT 0,
+					 long_url_safe  INTEGER  NOT NULL DEFAULT 1,
+					 created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					 created_by     TEXT     NOT NULL DEFAULT 'go.api',
+					 deleted_at     DATETIME DEFAULT NULL,
+					 deleted_by     TEXT     DEFAULT NULL,
+					 deleted_reason TEXT     DEFAULT NULL
+				  );
+	`)
 
-	for i := 0; i < count; i++ {
-		placeholders[i] = "?"
-	}
-	return strings.Join(placeholders, ", ")
+	return err
 }

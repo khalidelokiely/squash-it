@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,10 +14,10 @@ type RedisCache struct {
 	defaultTTL time.Duration
 }
 
-func NewRedisCache(defaultTTL time.Duration) *RedisCache {
+func NewRedisCache(host, port, password string, defaultTTL time.Duration) *RedisCache {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "my_secret_password",
+		Addr:     fmt.Sprintf("%s:%s", host, port),
+		Password: password,
 		DB:       0,
 	})
 	return &RedisCache{
@@ -38,4 +39,8 @@ func (c *RedisCache) Get(ctx context.Context, key string) (string, bool, error) 
 
 func (c *RedisCache) Set(ctx context.Context, key string, value string) error {
 	return c.rdb.Set(ctx, key, value, c.defaultTTL).Err()
+}
+
+func (c *RedisCache) Ping() error {
+	return c.rdb.Ping(context.Background()).Err()
 }

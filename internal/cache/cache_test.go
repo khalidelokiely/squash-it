@@ -3,38 +3,43 @@ package cache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 )
 
-func GetLRU(size int) *LRUCache {
-	return NewLRUCache(size)
-}
-
+// ErrCache extends Cache to allow test error injection.
 type ErrCache interface {
 	Cache
 	InjectError()
 }
+
+// MockLNCache provides an in-memory mock implementation of the Cache interface.
 type MockLNCache struct {
 	mu    sync.RWMutex
 	items map[string]string
 	err   bool
 }
 
+// NewLNCache constructs a new MockLNCache instance.
 func NewLNCache(size int) *MockLNCache {
 	return &MockLNCache{
 		items: make(map[string]string, size),
 	}
 }
+
+// Get retrieves a key from the mock cache.
 func (c *MockLNCache) Get(ctx context.Context, key string) (string, bool, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
+
 	if val, ok := c.items[key]; ok {
 		return val, true, nil
 	}
 	return "", false, nil
 }
 
+// Set stores a key-value pair or returns an error if error injection is active.
 func (c *MockLNCache) Set(ctx context.Context, key string, value string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,372 +51,391 @@ func (c *MockLNCache) Set(ctx context.Context, key string, value string) error {
 	return nil
 }
 
+// InjectError forces the mock cache to return errors on Set operations.
 func (c *MockLNCache) InjectError() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.err = true
-	c.mu.Unlock()
 }
 
-func GetPipeline() *Pipeline {
+// newTestLRU creates an LRU instance for testing purposes.
+func newTestLRU(t testing.TB, capacity int) *LRUCache {
+	t.Helper()
+	return NewLRUCache(capacity)
+}
+
+// newTestPipeline creates a two-tier mock pipeline for testing purposes.
+func newTestPipeline(t testing.TB) *Pipeline {
+	t.Helper()
 	l1 := NewLNCache(100)
 	l2 := NewLNCache(100)
-
 	return NewCachePipeline(l1, l2)
 }
 
+// TestLRU_Get verifies key retrieval and missing key handling in the LRU cache.
 func TestLRU_Get(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name          string
-		input         string
-		expectedValue string
-		expectedFound bool
+
+	tests := []struct {
+		name      string
+		input     string
+		wantValue string
+		wantFound bool
 	}{
-		{name: "Should Find", input: "k1", expectedValue: "v1", expectedFound: true},
-		{name: "Should Not Find", input: "k3", expectedValue: "", expectedFound: false},
+		{name: "Found Key", input: "k1", wantValue: "v1", wantFound: true},
+		{name: "Missing Key", input: "k3", wantValue: "", wantFound: false},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			lru := GetLRU(1)
+			lru := newTestLRU(t, 1)
 
-			lru.Set(context.Background(), "k1", "v1")
+			_ = lru.Set(context.Background(), "k1", "v1")
 
-			val, found, _ := lru.Get(context.Background(), tc.input)
-			if found != tc.expectedFound {
-				t.Errorf("expected %v, got %v", tc.expectedFound, found)
+			val, found, _ := lru.Get(context.Background(), tt.input)
+			if found != tt.wantFound {
+				t.Errorf("Get(%q) found = %v, want %v", tt.input, found, tt.wantFound)
 			}
-			if val != tc.expectedValue {
-				t.Errorf("expected %v, got %v", tc.expectedValue, val)
+			if val != tt.wantValue {
+				t.Errorf("Get(%q) value = %q, want %q", tt.input, val, tt.wantValue)
 			}
 		})
 	}
-
 }
 
+// TestLRU_Set verifies inserting new keys and updating existing keys in the LRU cache.
 func TestLRU_Set(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name          string
-		inputKey      string
-		inputValue    string
-		seedKey       string
-		seedValue     string
-		expectedValue *node
+
+	tests := []struct {
+		name       string
+		inputKey   string
+		inputValue string
+		seedKey    string
+		seedValue  string
+		wantValue  string
 	}{
-		{name: "add k1 v1", inputKey: "k1", inputValue: "v1", expectedValue: &node{key: "k1", value: "v1"}},
-		{name: "add k2 v2", inputKey: "k2", inputValue: "v2", expectedValue: &node{key: "k2", value: "v2"}},
-		{name: "change k2 to v3", inputKey: "k2", inputValue: "v3", seedKey: "k2", seedValue: "v2", expectedValue: &node{key: "k2", value: "v3"}},
+		{name: "Insert First Key", inputKey: "k1", inputValue: "v1", wantValue: "v1"},
+		{name: "Insert Second Key", inputKey: "k2", inputValue: "v2", wantValue: "v2"},
+		{name: "Update Existing Key", inputKey: "k2", inputValue: "v3", seedKey: "k2", seedValue: "v2", wantValue: "v3"},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			lru := GetLRU(2)
+			lru := newTestLRU(t, 2)
+			ctx := context.Background()
 
-			if tc.seedKey != "" {
-				lru.Set(context.Background(), tc.seedKey, tc.seedValue)
+			if tt.seedKey != "" {
+				_ = lru.Set(ctx, tt.seedKey, tt.seedValue)
 			}
-			lru.Set(context.Background(), tc.inputKey, tc.inputValue)
-			lru.mu.Lock()
-			defer lru.mu.Unlock()
+			_ = lru.Set(ctx, tt.inputKey, tt.inputValue)
 
-			val, ok := lru.items[tc.inputKey]
-			if !ok {
-				t.Fatalf("expected key %q to exist, but it was not found", tc.inputKey)
+			val, found, _ := lru.Get(ctx, tt.inputKey)
+			if !found {
+				t.Fatalf("Get(%q) key missing post-Set", tt.inputKey)
 			}
-
-			if val.key != tc.expectedValue.key || val.value != tc.expectedValue.value {
-				t.Errorf("expected %v, got %v", tc.expectedValue, val)
+			if val != tt.wantValue {
+				t.Errorf("Get(%q) value = %q, want %q", tt.inputKey, val, tt.wantValue)
 			}
 		})
 	}
 }
 
+// TestLRU_Evict verifies that capacity limits trigger least-recently-used eviction.
 func TestLRU_Evict(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name          string
-		capacity      int
-		seedKeys      []string
-		checkKey      string
-		expectedFound bool
-		expectedValue string
+
+	tests := []struct {
+		name      string
+		capacity  int
+		seedKeys  []string
+		checkKey  string
+		wantFound bool
+		wantValue string
 	}{
 		{
-			name:          "Should Evict Oldest From Cache",
-			capacity:      1,
-			seedKeys:      []string{"k1", "k2"},
-			checkKey:      "k1",
-			expectedFound: false,
-			expectedValue: "",
+			name:      "Evict Oldest At Capacity 1",
+			capacity:  1,
+			seedKeys:  []string{"k1", "k2"},
+			checkKey:  "k1",
+			wantFound: false,
+			wantValue: "",
 		},
 		{
-			name:          "Should Keep Newest Item And Evict Oldest",
-			capacity:      1,
-			seedKeys:      []string{"k1", "k2"},
-			checkKey:      "k2",
-			expectedFound: true,
-			expectedValue: "value_of_k2",
+			name:      "Retain Newest At Capacity 1",
+			capacity:  1,
+			seedKeys:  []string{"k1", "k2"},
+			checkKey:  "k2",
+			wantFound: true,
+			wantValue: "value_of_k2",
 		},
 		{
-			name:          "Should Keep Newest Item And Evict Oldest Extended Capacity",
-			capacity:      2,
-			seedKeys:      []string{"k1", "k2", "k3"},
-			checkKey:      "k1",
-			expectedFound: false,
-			expectedValue: "",
+			name:      "Evict Oldest At Capacity 2",
+			capacity:  2,
+			seedKeys:  []string{"k1", "k2", "k3"},
+			checkKey:  "k1",
+			wantFound: false,
+			wantValue: "",
 		},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-
-			lru := GetLRU(tc.capacity)
+			lru := newTestLRU(t, tt.capacity)
 			ctx := context.Background()
 
-			for _, key := range tc.seedKeys {
-				lru.Set(ctx, key, "value_of_"+key)
+			for _, key := range tt.seedKeys {
+				_ = lru.Set(ctx, key, "value_of_"+key)
 			}
 
-			val, found, _ := lru.Get(ctx, tc.checkKey)
-
-			if found != tc.expectedFound {
-				t.Fatalf("key %q: expected found %v, got %v", tc.checkKey, tc.expectedFound, found)
+			val, found, _ := lru.Get(ctx, tt.checkKey)
+			if found != tt.wantFound {
+				t.Fatalf("Get(%q) found = %v, want %v", tt.checkKey, found, tt.wantFound)
 			}
-
-			if val != tc.expectedValue {
-				t.Errorf("key %q: expected value %q, got %q", tc.checkKey, tc.expectedValue, val)
+			if val != tt.wantValue {
+				t.Errorf("Get(%q) value = %q, want %q", tt.checkKey, val, tt.wantValue)
 			}
 		})
 	}
 }
 
-func TestLRU_Race(t *testing.T) {}
+// TestLRU_Race verifies thread safety under heavy concurrent read and write operations.
+func TestLRU_Race(t *testing.T) {
+	t.Parallel()
+	lru := newTestLRU(t, 10)
+	ctx := context.Background()
 
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			key := fmt.Sprintf("key_%d", id%10)
+			val := fmt.Sprintf("val_%d", id)
+
+			_ = lru.Set(ctx, key, val)
+			_, _, _ = lru.Get(ctx, key)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// TestPipeline_GetFromNearest verifies short-circuit reads from upper cache tiers.
 func TestPipeline_GetFromNearest(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name          string
-		seedL1Key     string
-		seedL1Value   string
-		seedL2Key     string
-		seedL2Value   string
-		inputKey      string
-		expectedValue string
-		expectedFound bool
+
+	tests := []struct {
+		name      string
+		seedL1Key string
+		seedL1Val string
+		seedL2Key string
+		seedL2Val string
+		inputKey  string
+		wantVal   string
+		wantFound bool
 	}{
 		{
-			name:          "Exists in L1 Should Not Go to L2",
-			seedL1Key:     "k1",
-			seedL1Value:   "v1_L1",
-			seedL2Key:     "k1",
-			seedL2Value:   "v1_L2",
-			inputKey:      "k1",
-			expectedValue: "v1_L1",
-			expectedFound: true,
+			name:      "Hit L1 Directly",
+			seedL1Key: "k1",
+			seedL1Val: "v1_L1",
+			seedL2Key: "k1",
+			seedL2Val: "v1_L2",
+			inputKey:  "k1",
+			wantVal:   "v1_L1",
+			wantFound: true,
 		},
 		{
-			name:          "Doesnt Exist in L1 Should Go to L2",
-			seedL2Key:     "k1",
-			seedL2Value:   "v1_L2",
-			inputKey:      "k1",
-			expectedValue: "v1_L2",
-			expectedFound: true,
+			name:      "Fallthrough To L2",
+			seedL2Key: "k1",
+			seedL2Val: "v1_L2",
+			inputKey:  "k1",
+			wantVal:   "v1_L2",
+			wantFound: true,
 		},
 		{
-			name:          "Should not Exist in L1 Or L2",
-			inputKey:      "missing_key",
-			expectedValue: "",
-			expectedFound: false,
+			name:      "Miss All Tiers",
+			inputKey:  "missing_key",
+			wantVal:   "",
+			wantFound: false,
 		},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pipeline := GetPipeline()
+			pipeline := newTestPipeline(t)
 			ctx := context.Background()
 
-			if tc.seedL1Key != "" && len(pipeline.caches) > 0 {
-				pipeline.caches[0].Set(ctx, tc.seedL1Key, tc.seedL1Value)
+			if tt.seedL1Key != "" {
+				_ = pipeline.caches[0].Set(ctx, tt.seedL1Key, tt.seedL1Val)
 			}
-			if tc.seedL2Key != "" && len(pipeline.caches) > 1 {
-				pipeline.caches[1].Set(ctx, tc.seedL2Key, tc.seedL2Value)
-			}
-
-			val, found, _ := pipeline.Get(ctx, tc.inputKey)
-
-			if found != tc.expectedFound {
-				t.Errorf("expected %v, got %v", tc.expectedFound, found)
+			if tt.seedL2Key != "" {
+				_ = pipeline.caches[1].Set(ctx, tt.seedL2Key, tt.seedL2Val)
 			}
 
-			if val != tc.expectedValue {
-				t.Errorf("expected %v, got %v", tc.expectedValue, val)
+			val, found, _ := pipeline.Get(ctx, tt.inputKey)
+			if found != tt.wantFound {
+				t.Errorf("Get(%q) found = %v, want %v", tt.inputKey, found, tt.wantFound)
+			}
+			if val != tt.wantVal {
+				t.Errorf("Get(%q) value = %q, want %q", tt.inputKey, val, tt.wantVal)
 			}
 		})
 	}
 }
 
+// TestPipeline_GetFromFurthestBackfillNearest verifies that lower-tier cache hits backfill upper tiers.
 func TestPipeline_GetFromFurthestBackfillNearest(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name                  string
-		seedL1Key             string
-		seedL1Value           string
-		seedL2Key             string
-		seedL2Value           string
-		inputKey              string
-		expectedPipelineValue string
-		expectedL1Value       string
-		expectedFound         bool
+
+	tests := []struct {
+		name        string
+		seedL1Key   string
+		seedL1Val   string
+		seedL2Key   string
+		seedL2Val   string
+		inputKey    string
+		wantPipeVal string
+		wantL1Val   string
+		wantFound   bool
 	}{
 		{
-			name:                  "Exists in L2 Only Should Backfill L1",
-			seedL2Key:             "k1",
-			seedL2Value:           "v1_L2",
-			inputKey:              "k1",
-			expectedPipelineValue: "v1_L2",
-			expectedL1Value:       "v1_L2",
-			expectedFound:         true,
+			name:        "L2 Hit Backfills L1",
+			seedL2Key:   "k1",
+			seedL2Val:   "v1_L2",
+			inputKey:    "k1",
+			wantPipeVal: "v1_L2",
+			wantL1Val:   "v1_L2",
+			wantFound:   true,
 		},
 		{
-			name:                  "Exists in L1 And L2 Should NOT Backfill L1",
-			seedL1Key:             "k1",
-			seedL1Value:           "v1_L1",
-			seedL2Key:             "k1",
-			seedL2Value:           "v1_L2",
-			inputKey:              "k1",
-			expectedPipelineValue: "v1_L1",
-			expectedL1Value:       "v1_L1",
-			expectedFound:         true,
+			name:        "L1 Hit Does Not Modify L1 From L2",
+			seedL1Key:   "k1",
+			seedL1Val:   "v1_L1",
+			seedL2Key:   "k1",
+			seedL2Val:   "v1_L2",
+			inputKey:    "k1",
+			wantPipeVal: "v1_L1",
+			wantL1Val:   "v1_L1",
+			wantFound:   true,
 		},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pipeline := GetPipeline()
+			pipeline := newTestPipeline(t)
 			ctx := context.Background()
 
-			if tc.seedL1Key != "" && len(pipeline.caches) > 0 {
-				pipeline.caches[0].Set(ctx, tc.seedL1Key, tc.seedL1Value)
+			if tt.seedL1Key != "" {
+				_ = pipeline.caches[0].Set(ctx, tt.seedL1Key, tt.seedL1Val)
 			}
-			if tc.seedL2Key != "" && len(pipeline.caches) > 1 {
-				pipeline.caches[1].Set(ctx, tc.seedL2Key, tc.seedL2Value)
-			}
-
-			// 1. Assert the pipeline output itself
-			pipeVal, pipeFound, _ := pipeline.Get(ctx, tc.inputKey)
-			if pipeFound != tc.expectedFound {
-				t.Fatalf("pipeline Get: expected found %v, got %v", tc.expectedFound, pipeFound)
-			}
-			if pipeVal != tc.expectedPipelineValue {
-				t.Errorf("pipeline Get: expected value %q, got %q", tc.expectedPipelineValue, pipeVal)
+			if tt.seedL2Key != "" {
+				_ = pipeline.caches[1].Set(ctx, tt.seedL2Key, tt.seedL2Val)
 			}
 
-			if len(pipeline.caches) > 0 {
-				l1Val, l1Found, _ := pipeline.caches[0].Get(ctx, tc.inputKey)
-				if l1Found != tc.expectedFound {
-					t.Fatalf("L1 cache: expected found %v, got %v", tc.expectedFound, l1Found)
-				}
-				if l1Val != tc.expectedL1Value {
-					t.Errorf("L1 cache side-effect: expected %q, got %q", tc.expectedL1Value, l1Val)
-				}
+			pipeVal, pipeFound, _ := pipeline.Get(ctx, tt.inputKey)
+			if pipeFound != tt.wantFound {
+				t.Fatalf("Pipeline Get(%q) found = %v, want %v", tt.inputKey, pipeFound, tt.wantFound)
+			}
+			if pipeVal != tt.wantPipeVal {
+				t.Errorf("Pipeline Get(%q) value = %q, want %q", tt.inputKey, pipeVal, tt.wantPipeVal)
+			}
+
+			l1Val, l1Found, _ := pipeline.caches[0].Get(ctx, tt.inputKey)
+			if l1Found != tt.wantFound {
+				t.Fatalf("L1 Get(%q) found = %v, want %v", tt.inputKey, l1Found, tt.wantFound)
+			}
+			if l1Val != tt.wantL1Val {
+				t.Errorf("L1 side-effect Get(%q) value = %q, want %q", tt.inputKey, l1Val, tt.wantL1Val)
 			}
 		})
 	}
 }
 
+// TestPipeline_SetToAllCachesOrError verifies write operations propagate across all cache tiers.
 func TestPipeline_SetToAllCachesOrError(t *testing.T) {
 	t.Parallel()
-	testTable := []struct {
-		name                     string
-		inputKey                 string
-		inputValue               string
-		injectError              bool
-		onAll                    bool
-		expectedValue            string
-		expectedFound            bool
-		expectedErrorAtLeastOnce bool
+
+	tests := []struct {
+		name        string
+		inputKey    string
+		inputValue  string
+		injectError bool
+		onAll       bool
+		wantVal     string
+		wantFound   bool
+		wantErr     bool
 	}{
 		{
-			name:                     "Set Value To All Caches No Error",
-			inputKey:                 "k1",
-			inputValue:               "v1_L2",
-			injectError:              false,
-			expectedValue:            "v1_L2",
-			expectedFound:            true,
-			expectedErrorAtLeastOnce: false,
+			name:        "Set Success Across All Caches",
+			inputKey:    "k1",
+			inputValue:  "v1_L2",
+			injectError: false,
+			wantVal:     "v1_L2",
+			wantFound:   true,
+			wantErr:     false,
 		},
 		{
-			name:                     "Set Value To All Caches With Error On All",
-			inputKey:                 "k1",
-			inputValue:               "v1_L2",
-			injectError:              true,
-			onAll:                    true,
-			expectedValue:            "",
-			expectedFound:            false,
-			expectedErrorAtLeastOnce: true,
+			name:        "Set Fails On All Caches",
+			inputKey:    "k1",
+			inputValue:  "v1_L2",
+			injectError: true,
+			onAll:       true,
+			wantVal:     "",
+			wantFound:   false,
+			wantErr:     true,
 		},
 		{
-			name:                     "Set Value To All Caches With Error On One",
-			inputKey:                 "k1",
-			inputValue:               "v1_L2",
-			injectError:              true,
-			onAll:                    false,
-			expectedValue:            "v1_L2",
-			expectedFound:            true,
-			expectedErrorAtLeastOnce: true,
+			name:        "Set Fails On Partial Cache Tier",
+			inputKey:    "k1",
+			inputValue:  "v1_L2",
+			injectError: true,
+			onAll:       false,
+			wantVal:     "v1_L2",
+			wantFound:   true,
+			wantErr:     true,
 		},
 	}
 
-	for _, tc := range testTable {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			pipeline := GetPipeline()
+			pipeline := newTestPipeline(t)
 			ctx := context.Background()
-			if tc.injectError {
-				if tc.onAll {
-					for _, cache := range pipeline.caches {
-						if cache, ok := cache.(ErrCache); ok {
-							cache.InjectError()
+
+			if tt.injectError {
+				if tt.onAll {
+					for _, c := range pipeline.caches {
+						if errCache, ok := c.(ErrCache); ok {
+							errCache.InjectError()
 						}
 					}
 				} else {
-					if len(pipeline.caches) > 1 {
-						pipeline.caches[1].(ErrCache).InjectError()
-					}
+					pipeline.caches[1].(ErrCache).InjectError()
 				}
 			}
 
-			err := pipeline.Set(ctx, tc.inputKey, tc.inputValue)
-
-			if tc.expectedErrorAtLeastOnce {
-				if err == nil {
-					t.Fatalf("Set: expected error but got nil")
-				}
-			} else {
-				if err != nil {
-					t.Fatalf("Set: unexpected error: %v", err)
-				}
+			err := pipeline.Set(ctx, tt.inputKey, tt.inputValue)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Set(%q) error = %v, wantErr %v", tt.inputKey, err, tt.wantErr)
 			}
 
-			value, found, _ := pipeline.Get(ctx, tc.inputKey)
-
-			if found != tc.expectedFound {
-				t.Fatalf("Post-Set validation: expected found %v, got %v", tc.expectedFound, found)
+			val, found, _ := pipeline.Get(ctx, tt.inputKey)
+			if found != tt.wantFound {
+				t.Fatalf("Post-Set Get(%q) found = %v, want %v", tt.inputKey, found, tt.wantFound)
 			}
-			if value != tc.expectedValue {
-				t.Errorf("Post-Set validation: expected value %q, got %q", tc.expectedValue, value)
+			if val != tt.wantVal {
+				t.Errorf("Post-Set Get(%q) value = %q, want %q", tt.inputKey, val, tt.wantVal)
 			}
 		})
 	}

@@ -11,16 +11,21 @@ import (
 	"squash-it/internal/hash"
 )
 
-var ErrUnknownHash = errors.New("unknown hash token")
+var (
+	ErrUnknownHash = errors.New("unknown hash token")
+	ErrInvalidURL  = errors.New("invalid URL scheme or format. URL must start with http: or https: ")
+)
+
+var collisionRetryAttempts uint32 = 5
 
 type URLService struct {
-	repo     *URLRepository
-	pipeline *cache.Pipeline
+	repo     Repository
+	pipeline cache.Cache
 	filter   filter.Filter
 	hasher   hash.Hasher
 }
 
-func NewURLService(repo *URLRepository, pipeline *cache.Pipeline, filter filter.Filter, hasher hash.Hasher) *URLService {
+func NewURLService(repo Repository, pipeline cache.Cache, filter filter.Filter, hasher hash.Hasher) *URLService {
 	return &URLService{
 		repo:     repo,
 		pipeline: pipeline,
@@ -31,42 +36,50 @@ func NewURLService(repo *URLRepository, pipeline *cache.Pipeline, filter filter.
 
 // CreateURL takes in a bare url
 func (s *URLService) CreateURL(ctx context.Context, longURL string) (string, error) {
-	maxAttempts := uint32(5)
+	if !s.isValidURL(longURL) {
+		return "", ErrInvalidURL
+	}
 
-	for attempt := uint32(0); attempt < maxAttempts; attempt++ {
+	for attempt := uint32(0); attempt < collisionRetryAttempts; attempt++ {
 		hashToken, err := s.hasher.Generate8CharHash(longURL, attempt)
 
 		if err != nil {
 			return "", err
 		}
 
-		if !s.filter.Exists(hashToken) {
-			err := s.executeInsert(ctx, hashToken, longURL)
-			return hashToken, err
-		}
+		// False Positive
+		if s.filter.Exists(hashToken) {
+			result, err := s.lookupURLFromHash(ctx, hashToken)
 
-		existingURL, err := s.lookupURLFromHash(ctx, hashToken)
+			if err == nil {
+				if result == longURL {
+					return hashToken, nil
+				}
 
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				err := s.executeInsert(ctx, hashToken, longURL)
-				return hashToken, err
+				log.Printf("Hash collision on attempt %d: token %s belongs to %s", attempt, hashToken, result)
+				continue
 			}
 
-			fmt.Println(err.Error())
-
-			return "", fmt.Errorf("failed to verify url hashToken: %w", err)
+			if !errors.Is(err, ErrNotFound) {
+				return "", fmt.Errorf("unexpected error during hash lookup %w", err)
+			}
 		}
 
-		if existingURL == longURL {
-			return hashToken, nil
+		pathHash, err := s.executeInsert(ctx, hashToken, longURL)
+
+		if err == nil {
+			return pathHash, nil
 		}
 
-		// Collision
-		log.Printf("Hash Collision detected for token %s on attempt %d", hashToken, attempt)
+		if errors.Is(err, ErrDuplicatedPathHash) {
+			log.Printf("Hash Collision detected for token %s on attempt %d", hashToken, attempt)
+			continue
+		}
+
+		return "", fmt.Errorf("failed to execute insert %w", err)
 	}
 
-	return "", fmt.Errorf("failed to generate hash for url after %d attempts", maxAttempts)
+	return "", fmt.Errorf("failed to generate hash for url after %d attempts", collisionRetryAttempts)
 }
 
 func (s *URLService) GetURLFromHash(ctx context.Context, hashToken string) (string, error) {
@@ -81,11 +94,11 @@ func (s *URLService) GetURLFromHash(ctx context.Context, hashToken string) (stri
 }
 
 func (s *URLService) UpdateClickCount(ctx context.Context, hashToken string) error {
-	return s.repo.UpdateClickCount(ctx, hashToken)
+	return s.repo.UpdateClickCountByPathHash(ctx, hashToken)
 }
 
 // executeInsert
-func (s *URLService) executeInsert(ctx context.Context, hashToken, longURL string) error {
+func (s *URLService) executeInsert(ctx context.Context, hashToken, longURL string) (string, error) {
 	model := &URL{
 		PathHash: hashToken,
 		LongURL:  longURL,
@@ -95,21 +108,39 @@ func (s *URLService) executeInsert(ctx context.Context, hashToken, longURL strin
 	err := s.repo.Create(ctx, model)
 
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Propagate to caches
-	if err := s.pipeline.Set(ctx, hashToken, longURL); err != nil {
+	if err := s.pipeline.Set(ctx, model.PathHash, longURL); err != nil {
 		log.Printf("Setting %s to %s failed: %v", hashToken, longURL, err)
 	}
 
 	// Add to filter
-	s.filter.Add(hashToken)
+	s.filter.Add(model.PathHash)
 
-	return nil
+	return model.PathHash, nil
 }
 
 // TODO: Use this method in a retry loop
+
+func (s *URLService) lookupLongURL(ctx context.Context, longURL string) (string, error) {
+	model, err := s.repo.FindByLongURL(ctx, longURL)
+
+	if err != nil {
+		return "", err
+	}
+
+	err = s.pipeline.Set(ctx, model.PathHash, longURL)
+
+	if err != nil {
+		log.Printf("Setting %s to %s failed: %v", model.PathHash, model.LongURL, err)
+	}
+
+	s.filter.Add(model.PathHash)
+
+	return model.PathHash, nil
+}
 
 // lookupURLFromHash
 func (s *URLService) lookupURLFromHash(ctx context.Context, hashToken string) (string, error) {

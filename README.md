@@ -27,8 +27,7 @@ They get squashed!
 - A simple SQLite database with a single table. This is the main choice over NoSQL because of the simplicity it offers for this demo / assignment.
 
 ## Architecture Diagram
-// diagram here
-
+![img.png](img.png)
 ## External Packages Used
 
 - Bloom Filter package [bits-and-blooms/bloom](https://github.com/bits-and-blooms/bloom)

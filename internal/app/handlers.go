@@ -9,7 +9,7 @@ import (
 	"squash-it/internal/router"
 )
 
-var ErrInvalidURL = errors.New("invalid URL. URL must start with http or https")
+// TODO[SCALING - Observability]: Add span tracer to every handler + metrics for p99
 
 type URLEncodeDTO struct {
 	LongURL string `json:"long_url"`
@@ -29,19 +29,18 @@ func NewURLShortenHandler(svc *URLService) *URLShortenHandler {
 	}
 }
 
+// EncodeURL binds to a URLEncodeDTO and passes it to URLService.CreateURL
+// returns
+//
+//	400 Bad Request: If DTO is deformed and can't be unmarshaled into the URLDecodeDTO Struct
+//	500 Internal Server Error: Upon failures beyond lookups
+//	201 Created: Upon successful shortening of the LongURL.
 func (h *URLShortenHandler) EncodeURL(ctx context.Context, c *router.RequestContext) {
 	var urlDTO URLEncodeDTO
 
 	if err := c.BindAndValidate(&urlDTO); err != nil {
 		c.JSON(http.StatusBadRequest, map[string]interface{}{
 			"error": err.Error(),
-		})
-		return
-	}
-
-	if !h.svc.isValidURL(urlDTO.LongURL) {
-		c.JSON(http.StatusBadRequest, map[string]interface{}{
-			"error": ErrInvalidURL.Error(),
 		})
 		return
 	}
@@ -55,12 +54,19 @@ func (h *URLShortenHandler) EncodeURL(ctx context.Context, c *router.RequestCont
 		return
 	}
 
-	c.JSON(http.StatusOK, map[string]interface{}{
+	c.JSON(http.StatusCreated, map[string]interface{}{
 		"short_url": fmt.Sprintf("%s/%s", c.Request.Host, hash),
 	})
 	return
 }
 
+// DecodeURL binds to a URLDecodeDTO and passes it to URLService.GetURLFromHash
+// returns
+//
+//	400 Bad Request: If DTO is deformed and can't be unmarshaled into the URLDecodeDTO Struct
+//	404 Not Found: Not Found if pathHash is invalid
+//	500 Internal Server Error: Upon failures beyond lookups
+//	200 OK + URLEncodeDTO: Upon successful lookup
 func (h *URLShortenHandler) DecodeURL(ctx context.Context, c *router.RequestContext) {
 	var pathHashDTO URLDecodeDTO
 	if err := c.BindAndValidate(&pathHashDTO); err != nil {
@@ -92,8 +98,14 @@ func (h *URLShortenHandler) DecodeURL(ctx context.Context, c *router.RequestCont
 	return
 }
 
+// VisitURL takes a pathHash named parameter and redirects to original / long url.
+// returns
+//
+//	404 Not Found: Not Found if pathHash is invalid
+//	500 Internal Server Error: Upon failures beyond lookups
+//	302 Found + Location Header: Upon successful lookup. 302 is intentional to prevent permanent browser caching.
 func (h *URLShortenHandler) VisitURL(ctx context.Context, c *router.RequestContext) {
-	hashToken := c.Param("hashToken")
+	hashToken := c.Param("pathHash")
 
 	longURL, err := h.svc.GetURLFromHash(ctx, hashToken)
 

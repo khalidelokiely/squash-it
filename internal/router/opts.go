@@ -1,6 +1,9 @@
 package router
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Options struct {
 	Port         string
@@ -17,12 +20,12 @@ type Option struct {
 
 // WithHostPorts option allows changing default listening port
 // TODO: Add checks to the hostPort string
-func WithHostPorts(hostPort string) Option {
+func WithHostPorts(port string) Option {
 	return Option{func(o *Options) {
-		if hostPort == "" {
+		if port == "" {
 			return
 		}
-		o.Port = ":" + o.Port
+		o.Port = strings.TrimPrefix(port, ":") // Cleanly set the port
 	}}
 }
 
