@@ -8,6 +8,7 @@ They get squashed!
 # Table of contents
 - [Architecture behind Squash-it](#architecture-behind-squash-it)
 - [Architecture Diagram](#high-level-architecture-diagram)
+- [Running The App]()
 - [External Packages Used](#external-packages-used)
 - [Custom Components](#custom-components)
 - [Hash Choice](#hash-choice)
@@ -38,7 +39,9 @@ They get squashed!
 - The service generates an 8 character murmur hash inside a retry loop for collision resolution
 - The hash is evaluated against Bloom filter. 
   - If it doesn't exist an idempotent executeInsert method is called on the hashToken and the longURL. Returning the final hashToken to the user
-  - If bloom asserts FP (Maybe exists). We issue a lookup into the database (by the hash / pathHash). Check if the returned longURL matches the user's intention. If it doesn't a collision happened, we move on with another retry.
+  - If bloom asserts FP (Maybe exists). We issue a lookup into the database (by the hash / pathHash). Check if the returned longURL matches the user's intention:
+    - If it does return the existing url
+    - If it doesn't then a collision with different longURLs happened, we continue to retry with another hash.
 - This loop continues until we either create or find a proper pathHash matching the longURL provided. Or we run out of retries and exit the service so we don't hash indefinitely.
 
 ### **`/decode` Flow (pathHash -> LongURL):**
@@ -55,6 +58,30 @@ They get squashed!
 This route takes in the full url. Does the same as the decode flow except:
 - update the click_count metric in the database
 - Redirect the user to the longURL using a `302 Found` code so that the browser doesn't cache the Location header.
+
+## Running The App
+The app can be run in 2 modes:
+- **Isolated without any over-network dependencies (Like Redis) - Simply clone the repo and run:**
+
+```aiignore
+go run main.go
+```
+- With L2 Cache (REDIS). This will spin up a redis container + build the app in a 2-step distroless image:
+
+```aiignore
+docker compose up -d
+```
+
+## Testing
+
+Test coverage was included for the majority of required cases. Some edge cases are not explicitly tested such as:
+- What happens when a 2 goroutines get the same hash for the same. One gorotuine will succeed and the other will face a slient CONFLICT on write due to (sql: long_url unique constraint). The system will gracefully pass the hashToken created from the first goroutine.
+
+To run tests:
+```aiignore
+go test -v -race ./...
+```
+
 ## External Packages Used
 
 - Bloom Filter package [bits-and-blooms/bloom](https://github.com/bits-and-blooms/bloom)

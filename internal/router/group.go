@@ -10,6 +10,8 @@ type RouteGroup struct {
 	router      *Router
 }
 
+// Group creates a grouped set of routes under a static prefix. All Group Middleware are executed first before individual
+// middleware
 func (r *Router) Group(prefix string, middleware ...HandlerFunc) *RouteGroup {
 	middlewares := make([]HandlerFunc, len(middleware))
 	copy(middlewares, middleware)
@@ -21,6 +23,7 @@ func (r *Router) Group(prefix string, middleware ...HandlerFunc) *RouteGroup {
 	}
 }
 
+// Use add middleware(s) to the group
 func (g *RouteGroup) Use(middleware ...HandlerFunc) {
 	g.middlewares = append(g.middlewares, middleware...)
 }

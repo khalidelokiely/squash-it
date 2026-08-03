@@ -66,15 +66,14 @@ func (r *RequestContext) GetClientIP() string {
 		}
 	}
 
-	// 2. Alternative proxy header (used by some proxies/load balancers like AWS/Cloudflare)
+	// Alternative proxy header (used by some proxies/load balancers like AWS/Cloudflare)
 	if xRealIP := r.Request.Header.Get("X-Real-IP"); xRealIP != "" {
 		if net.ParseIP(xRealIP) != nil {
 			return xRealIP
 		}
 	}
 
-	// 3. Fallback to RemoteAddr if no proxy headers exist.
-	// RemoteAddr always contains "IP:port" (e.g., "192.168.1.5:54321" or "[::1]:54321").
+	// Fallback to RemoteAddr if no proxy headers exist.
 	host, _, err := net.SplitHostPort(r.Request.RemoteAddr)
 	if err != nil {
 		return r.Request.RemoteAddr
@@ -83,7 +82,7 @@ func (r *RequestContext) GetClientIP() string {
 	return host
 }
 
-// Executes the next handler func in chain
+// Next Executes the next handler func in chain
 func (r *RequestContext) Next(c context.Context) {
 	r.currIndex++
 	for r.currIndex < len(r.handlers) {
@@ -92,6 +91,8 @@ func (r *RequestContext) Next(c context.Context) {
 	}
 }
 
+// Abort aborts the request. It stops where the Abort was called. If in a middleware no further requests including
+// the handler are called.
 func (r *RequestContext) Abort() {
 	r.currIndex = 64
 }

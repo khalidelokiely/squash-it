@@ -13,19 +13,19 @@ type Router struct {
 
 // NewRouter creates a new router
 func NewRouter(opts ...Option) *Router {
-	options := &Options{
+	options := Options{
 		Port:         "8080",
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
 
 	for _, opt := range opts {
-		opt.F(options)
+		opt.F(&options)
 	}
 
 	return &Router{
 		mux:  http.NewServeMux(),
-		opts: options,
+		opts: &options,
 	}
 }
 

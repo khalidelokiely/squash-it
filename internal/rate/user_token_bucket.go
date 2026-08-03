@@ -13,12 +13,6 @@ type tokenBucket struct {
 	lastSeen time.Time
 }
 
-func newTokenBucket(limiter *rate.Limiter) *tokenBucket {
-	return &tokenBucket{
-		limiter: limiter,
-	}
-}
-
 type UserTokenBucket struct {
 	mu           sync.Mutex
 	userTokens   map[string]*tokenBucket
@@ -73,13 +67,16 @@ func (u *UserTokenBucket) Allow(userID string) bool {
 	return allowed
 }
 
+// cleanUp Lazy Async cleanup loop the decision came from complexity of most of the use cases.
+// instead of spinning up a goroutine with a ticker we perform the check lazily so we don't exhaust
+// CPU when idle.
 func (u *UserTokenBucket) cleanUp() {
 	defer u.isCleaningUp.Store(0)
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
 	lastCleanUpUnix := u.lastCleanUp.Load()
-	// Cleaned up less than 5 minutes ago
+	// Cleaned up less than n duration ago
 	if time.Since(time.Unix(lastCleanUpUnix, 0)) < u.cleanUpAfter {
 		return
 	}

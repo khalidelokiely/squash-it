@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -50,7 +51,9 @@ func main() {
 	// Create Rate Limiter
 	limiter := rate.NewUserTokenBucket(cfg.RatePerMinute, cfg.RateBurst, cfg.RateCleanupInterval)
 
-	r := router.NewRouter()
+	fmt.Println(cfg.Port)
+	r := router.NewRouter(router.WithHostPorts(cfg.Port))
+
 	// Boot up app and HTTP Routes
 	app.New(ctx, database, pipeline, bloom, hasher, r, limiter)
 

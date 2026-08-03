@@ -1,12 +1,16 @@
 package config
 
 import (
+	"log"
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
+	Port                string
 	DBName              string
 	BloomFilePath       string
 	BloomSaveInterval   time.Duration
@@ -22,8 +26,16 @@ type Config struct {
 	ShutdownTimeout     time.Duration
 }
 
+// Load loads the config parameters with default values in case they weren't set in the environemnt
 func Load() Config {
+	err := godotenv.Load()
+
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
 	return Config{
+		Port:                getEnv("PORT", "8080"),
 		DBName:              getEnv("DATABASE_NAME", "squash.db"),
 		BloomFilePath:       getEnv("BLOOM_BINARY_FILE_PATH", "data/squash-it.bloom.bin"),
 		BloomSaveInterval:   time.Duration(getEnvInt("BLOOM_BINARY_SAVE_INTERVAL_SECONDS", 5)) * time.Second,

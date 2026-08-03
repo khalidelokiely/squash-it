@@ -104,7 +104,7 @@ func (s *URLService) executeInsert(ctx context.Context, hashToken, longURL strin
 		LongURL:  longURL,
 	}
 
-	// Persist in Repository
+	// Persist in database
 	err := s.repo.Create(ctx, model)
 
 	if err != nil {
@@ -116,7 +116,6 @@ func (s *URLService) executeInsert(ctx context.Context, hashToken, longURL strin
 		log.Printf("Setting %s to %s failed: %v", hashToken, longURL, err)
 	}
 
-	// Add to filter
 	s.filter.Add(model.PathHash)
 
 	return model.PathHash, nil

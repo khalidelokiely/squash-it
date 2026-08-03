@@ -19,7 +19,6 @@ type Option struct {
 }
 
 // WithHostPorts option allows changing default listening port
-// TODO: Add checks to the hostPort string
 func WithHostPorts(port string) Option {
 	return Option{func(o *Options) {
 		if port == "" {
