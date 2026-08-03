@@ -31,11 +31,11 @@ They get squashed!
 
 ## External Packages Used
 
-- Bloom Filter package [bits-and-blooms/bloom](github.com/bits-and-blooms/bloom/v3 v3.7.1)
-- Redis client for go [redis/go-redis](github.com/redis/go-redis/v9 v9.21.0) 
-- Murmur Hash Package (More on that below) [twmb/murmur3](github.com/twmb/murmur3 v1.1.8)
-- Go's Rate package for rate limiting [time/rate](golang.org/x/time v0.15.0)
-- SQLite Driver for go. Modernc is used here to enable CGO_ENABLE=0 in Docker build [modernc/sqlite](modernc.org/sqlite v1.55.0)
+- Bloom Filter package [bits-and-blooms/bloom](https://github.com/bits-and-blooms/bloom)
+- Redis client for go [redis/go-redis](https://github.com/redis/go-redis)
+- Murmur Hash Package (More on that below) [twmb/murmur3](https://github.com/twmb/murmur3)
+- Go's Rate package for rate limiting [time/rate](https://pkg.go.dev/golang.org/x/time/rate)
+- SQLite Driver for go. Modernc is used here to enable CGO_ENABLE=0 in Docker build [modernc/sqlite](https://pkg.go.dev/modernc.org/sqlite)
 
 ## Custom Components
 
