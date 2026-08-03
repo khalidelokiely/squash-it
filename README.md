@@ -94,7 +94,7 @@ A distributed bloom filter on redis (via RedisBloom) would be the choice, with p
 
 - Viral or "promoted" (if monetized) urls also might need a special handling in terms of rate limiting - not per user - but per url + user combination.
 
-#### Observability 
+#### Observability
 Throughout the service, it was made sure that `context.Context` is glorified for the exact purpose of this section. Scaling. 
 
 Which is an PoC of why the abstraction over `net/http` was created for this project. To provide `context.Context` cleanly as the first parameter in route handler function `router.HandlerFunc`. 
