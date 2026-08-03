@@ -5,6 +5,10 @@ Its name is a metaphorical representation for what happens with large urls in sh
 
 They get squashed!
 
+[![Go Version](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go)](https://go.dev/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Render-46E3B7?style=flat-square&logo=render)](https://squash-it.onrender.com)
+[![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Layered-orange?style=flat-square)]()
+
 # Table of contents
 - [Architecture behind Squash-it](#architecture-behind-squash-it)
 - [Architecture Diagram](#high-level-architecture-diagram)
