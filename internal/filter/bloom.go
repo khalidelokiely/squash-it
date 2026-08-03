@@ -1,19 +1,15 @@
-package main
+package filter
 
 import (
+	"fmt"
+	"io"
 	"log"
 	"sync"
 
 	"github.com/bits-and-blooms/bloom/v3"
 )
 
-type Filter interface {
-	Exists(key string) bool
-	Add(key string)
-	Serialize() ([]byte, error)
-}
-
-type BloomFilter struct {
+type Bloom struct {
 	bf      *bloom.BloomFilter
 	ready   bool
 	backlog []string
@@ -22,8 +18,8 @@ type BloomFilter struct {
 	mu sync.RWMutex
 }
 
-func NewBloomFilter(items uint) *BloomFilter {
-	return &BloomFilter{
+func NewBloom(items uint) *Bloom {
+	return &Bloom{
 		bf:      bloom.NewWithEstimates(items, 0.01),
 		ready:   true,
 		backlog: nil,
@@ -32,7 +28,7 @@ func NewBloomFilter(items uint) *BloomFilter {
 
 // NewFromBinary loads a serialized Bloom filter from a byte slice with a non-blocking,
 // graceful fallback mechanism.
-// During instantiation, it immediately returns a usable BloomFilter backed by an empty
+// During instantiation, it immediately returns a usable Bloom backed by an empty
 // fallback, while a background goroutine unmarshals the historical data.
 // Concurrency behavior during background loading:
 //   - Reads: Exists() safely defaults to true (triggering a pessimistic service-level database lookup)
@@ -42,15 +38,17 @@ func NewBloomFilter(items uint) *BloomFilter {
 // When the background reload completes (or fails), the backlog is flushed into the
 // active filter to ensure zero data loss, and standard Bloom filtering resumes.
 //
-// TODO: The main nuance to address while scaling this bloom.BloofFilter is that to enable resiliency across
-//
-//	multiple application instances, the remote storage location for the serialized filter must be locked.
-//	A distributed lock ensures an instance safely loads and reserializes the state before another instance
-//	pulls the updated copy.
-func NewFromBinary(items uint, data []byte) *BloomFilter {
+// TODO: The main nuance to address while scaling this bloom.BloofFilter is that
+//		to enable resiliency across multiple application instances, the remote
+//		storage location for the serialized filter must be locked. A distributed
+//		lock ensures an instance safely loads and reserializes the state before
+//		another instance pulls the updated copy.
+
+func NewFromBinary(items uint, data []byte) *Bloom {
+	fmt.Println("found bloom filter, begnnning restore")
 	fallbackBf := bloom.NewWithEstimates(items, 0.01)
 
-	filter := &BloomFilter{
+	filter := &Bloom{
 		bf:      fallbackBf,
 		ready:   false,
 		backlog: make([]string, 0, 1024),
@@ -86,31 +84,37 @@ func NewFromBinary(items uint, data []byte) *BloomFilter {
 	return filter
 }
 
-func (f *BloomFilter) Exists(key string) bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+func (b *Bloom) Exists(key string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 
-	if f.ready {
-		return f.bf.TestString(key)
+	if b.ready {
+		return b.bf.TestString(key)
 	}
 
 	return true
 }
 
-func (f *BloomFilter) Add(key string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+func (b *Bloom) Add(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	if !f.ready {
-		f.backlog = append(f.backlog, key)
+	if !b.ready {
+		b.backlog = append(b.backlog, key)
 		return
 	}
 
-	f.bf.AddString(key)
+	b.bf.AddString(key)
 }
 
-func (f *BloomFilter) Serialize() ([]byte, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.bf.MarshalBinary()
+func (b *Bloom) Serialize() ([]byte, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.bf.MarshalBinary()
+}
+
+func (b *Bloom) WriteTo(w io.Writer) (int64, error) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.bf.WriteTo(w)
 }

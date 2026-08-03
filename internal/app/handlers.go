@@ -1,11 +1,15 @@
-package main
+package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
-	"squash-it/router"
+	"squash-it/internal/router"
 )
+
+var ErrInvalidURL = errors.New("invalid URL. URL must start with http or https")
 
 type URLEncodeDTO struct {
 	LongURL string `json:"long_url"`
@@ -34,7 +38,15 @@ func (h *URLShortenHandler) EncodeURL(ctx context.Context, c *router.RequestCont
 		})
 		return
 	}
-	hash, err := h.svc.ShortenURL(ctx, urlDTO.LongURL)
+
+	if !h.svc.isValidURL(urlDTO.LongURL) {
+		c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": ErrInvalidURL.Error(),
+		})
+		return
+	}
+
+	hash, err := h.svc.CreateURL(ctx, urlDTO.LongURL)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, map[string]interface{}{
@@ -57,10 +69,17 @@ func (h *URLShortenHandler) DecodeURL(ctx context.Context, c *router.RequestCont
 		})
 	}
 
-	longURL, err := h.svc.GetURLFromPathHash(ctx, pathHashDTO.PathHash)
+	longURL, err := h.svc.GetURLFromHash(ctx, pathHashDTO.PathHash)
 
 	if err != nil {
-		c.JSON(http.StatusNotFound, map[string]interface{}{
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, map[string]interface{}{
 			"error": err.Error(),
 		})
 		return
@@ -76,13 +95,24 @@ func (h *URLShortenHandler) DecodeURL(ctx context.Context, c *router.RequestCont
 func (h *URLShortenHandler) VisitURL(ctx context.Context, c *router.RequestContext) {
 	hashToken := c.Param("hashToken")
 
-	longURL, err := h.svc.GetURLFromPathHash(ctx, hashToken)
+	longURL, err := h.svc.GetURLFromHash(ctx, hashToken)
 
 	if err != nil {
-		c.JSON(http.StatusNotFound, map[string]interface{}{
-			"error": "invalid hash token",
+		if errors.Is(err, ErrUnknownHash) {
+			c.JSON(http.StatusNotFound, map[string]interface{}{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"error": err.Error(),
 		})
 		return
+	}
+
+	if err := h.svc.UpdateClickCount(ctx, hashToken); err != nil {
+		log.Printf("failed to update click count: %v", err)
 	}
 
 	c.Redirect(http.StatusFound, longURL)

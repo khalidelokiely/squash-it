@@ -1,21 +1,13 @@
-package main
+package cache
 
 import "context"
 
-type Cache interface {
-	// Get fetch the value from the cache
-	Get(ctx context.Context, key string) (string, bool, error)
-
-	// Set a k/v pair into the cache
-	Set(ctx context.Context, key string, value string) error
-}
-
-type CachePipeline struct {
+type Pipeline struct {
 	caches []Cache
 }
 
-func NewCachePipeline(caches ...Cache) *CachePipeline {
-	return &CachePipeline{caches: caches}
+func NewCachePipeline(caches ...Cache) *Pipeline {
+	return &Pipeline{caches: caches}
 }
 
 // Get iterates through the different layers of caches we've initialized it with
@@ -26,7 +18,7 @@ func NewCachePipeline(caches ...Cache) *CachePipeline {
 //     into all higher layers so future requests resolve optimally without leaving the
 //     local network (LRU cache for squash-it)
 //  3. A cache miss. boolean returns false. How we get the data later is not its responsibility
-func (c *CachePipeline) Get(ctx context.Context, key string) (string, bool, error) {
+func (c *Pipeline) Get(ctx context.Context, key string) (string, bool, error) {
 	var result string
 	var found bool
 	hitIndex := -1
@@ -63,7 +55,7 @@ func (c *CachePipeline) Get(ctx context.Context, key string) (string, bool, erro
 // Set takes a key and value and sets them into all cache layers in the pipeline in reverse
 // order (LN -> L1)
 // if there is an error in any layer, the last Err is returned.
-func (c *CachePipeline) Set(ctx context.Context, key string, value string) error {
+func (c *Pipeline) Set(ctx context.Context, key string, value string) error {
 	var lastErr error
 
 	for i := len(c.caches) - 1; i >= 0; i-- {

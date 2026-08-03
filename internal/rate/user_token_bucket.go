@@ -1,0 +1,92 @@
+package rate
+
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/time/rate"
+)
+
+type tokenBucket struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
+func newTokenBucket(limiter *rate.Limiter) *tokenBucket {
+	return &tokenBucket{
+		limiter: limiter,
+	}
+}
+
+type UserTokenBucket struct {
+	mu           sync.Mutex
+	userTokens   map[string]*tokenBucket
+	rate         rate.Limit
+	burstLimit   int
+	lastCleanUp  atomic.Int64
+	isCleaningUp atomic.Int32
+}
+
+func NewUserTokenBucket(ratePerMinute int, burst int) *UserTokenBucket {
+	limitPerSecond := rate.Limit(float64(ratePerMinute) / 60.0)
+
+	utb := &UserTokenBucket{
+		userTokens: make(map[string]*tokenBucket),
+		rate:       limitPerSecond,
+		burstLimit: burst,
+	}
+
+	utb.lastCleanUp.Store(time.Now().Unix())
+
+	return utb
+}
+
+func (u *UserTokenBucket) Allow(userID string) bool {
+	u.mu.Lock()
+
+	bucket, ok := u.userTokens[userID]
+
+	if !ok {
+		bucket = &tokenBucket{
+			limiter:  rate.NewLimiter(u.rate, u.burstLimit),
+			lastSeen: time.Now(),
+		}
+
+		u.userTokens[userID] = bucket
+	}
+
+	bucket.lastSeen = time.Now()
+	allowed := bucket.limiter.Allow()
+
+	u.mu.Unlock()
+
+	lastCleanupUnix := u.lastCleanUp.Load()
+
+	if time.Since(time.Unix(lastCleanupUnix, 0)) > 5*time.Minute {
+		if u.isCleaningUp.CompareAndSwap(0, 1) {
+			go u.cleanUp()
+		}
+	}
+
+	return allowed
+}
+
+func (u *UserTokenBucket) cleanUp() {
+	defer u.isCleaningUp.Store(0)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	lastCleanUpUnix := u.lastCleanUp.Load()
+	if time.Since(time.Unix(lastCleanUpUnix, 0)) > 5*time.Minute {
+		return
+	}
+
+	for userID, bucket := range u.userTokens {
+		if time.Since(bucket.lastSeen) > 5*time.Minute {
+			delete(u.userTokens, userID)
+		}
+	}
+
+	u.lastCleanUp.Store(time.Now().Unix())
+}

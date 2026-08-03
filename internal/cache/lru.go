@@ -1,34 +1,34 @@
-package main
+package cache
 
 import (
 	"context"
 	"sync"
 )
 
-type Node struct {
+type node struct {
 	key   string
 	value string
-	next  *Node
-	prev  *Node
+	next  *node
+	prev  *node
 }
 
 type LRUCache struct {
-	items map[string]*Node
-	head  *Node
-	tail  *Node
+	items map[string]*node
+	head  *node
+	tail  *node
 	size  int
 	mu    sync.Mutex
 }
 
 func NewLRUCache(size int) *LRUCache {
-	sentinelHead := &Node{key: "", value: "", next: nil, prev: nil}
-	sentinelTail := &Node{key: "", value: "", next: nil, prev: nil}
+	sentinelHead := &node{key: "", value: "", next: nil, prev: nil}
+	sentinelTail := &node{key: "", value: "", next: nil, prev: nil}
 
 	sentinelHead.next = sentinelTail
 	sentinelTail.prev = sentinelHead
 
 	return &LRUCache{
-		items: make(map[string]*Node, size),
+		items: make(map[string]*node, size),
 		head:  sentinelHead,
 		tail:  sentinelTail,
 		size:  size,
@@ -37,13 +37,13 @@ func NewLRUCache(size int) *LRUCache {
 
 // removeNode detaches a node from the list safely by changing its next->prev and prev->next
 // pointers
-func (l *LRUCache) removeNode(node *Node) {
+func (l *LRUCache) removeNode(node *node) {
 	node.prev.next = node.next
 	node.next.prev = node.prev
 }
 
 // addNode attaches a node to the head of the list (right next to the sentinel Head)
-func (l *LRUCache) addNode(node *Node) {
+func (l *LRUCache) addNode(node *node) {
 	node.prev = l.head
 	node.next = l.head.next
 	l.head.next.prev = node
@@ -94,7 +94,7 @@ func (l *LRUCache) Set(ctx context.Context, key string, value string) error {
 		l.evict()
 	}
 
-	node := &Node{key: key, value: value}
+	node := &node{key: key, value: value}
 	l.items[key] = node
 	// position the node within the list
 	l.addNode(node)
