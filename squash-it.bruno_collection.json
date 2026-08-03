@@ -1,0 +1,86 @@
+{
+  "info": {
+    "name": "SQUASH-IT",
+    "description": "API Collection for Squash-It URL Shortener",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Encode",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "{{url}}/encode",
+          "protocol": "http",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "encode"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"long_url\": \"https://www.facebook.com/who\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Decode",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "auth": {
+          "type": "noauth"
+        },
+        "url": {
+          "raw": "{{url}}/decode",
+          "protocol": "http",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "decode"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"path_hash\": \"0be57e64\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "url",
+      "value": "http://localhost:8080",
+      "type": "default"
+    }
+  ]
+}

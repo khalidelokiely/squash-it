@@ -23,6 +23,7 @@ var testHasher = hash.NewMurmurHash(6)
 // Setup fresh app for each test
 func setupTestApp(t *testing.T) http.Handler {
 	cfg := config.Load()
+	cfg.DBName = ":memory:"
 	database := db.NewSQLite(cfg.DBName)
 	pipeline := cache.NewLRUCache(100)
 	bloom := filter.NewBloom(1000)
@@ -92,7 +93,9 @@ func TestFunctional_EncodeDecodeFlow(t *testing.T) {
 	encodeRec := setupEncode(r, longURL)
 	var encodeResp map[string]string
 	_ = json.Unmarshal(encodeRec.Body.Bytes(), &encodeResp)
-	h := strings.Split(encodeResp["short_url"], "/")[1]
+	parts := strings.Split(encodeResp["short_url"], "/")
+	h := parts[len(parts)-1]
+
 	if h == "" {
 		t.Fatalf("Failed to retrieve hash from encode response: %s", encodeRec.Body.String())
 	}
