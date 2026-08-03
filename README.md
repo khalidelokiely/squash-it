@@ -8,7 +8,8 @@ They get squashed!
 # Table of contents
 - [Architecture behind Squash-it](#architecture-behind-squash-it)
 - [Architecture Diagram](#high-level-architecture-diagram)
-- [Running The App]()
+- [Running The App](#running-the-app)
+- [Testing](#testing)
 - [External Packages Used](#external-packages-used)
 - [Custom Components](#custom-components)
 - [Hash Choice](#hash-choice)
